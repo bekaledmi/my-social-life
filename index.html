@@ -2550,18 +2550,19 @@ async function saveTalkingEntry(editId) {
   const dateEnd = document.getElementById('talking-end').value || '';
   const note = document.getElementById('talking-note').value.trim();
   const why = document.getElementById('talking-why').value.trim();
+  const dirPersonId = (document.getElementById('talking-dir-id')||{}).value||'';
   if (!name.trim()) { document.getElementById('talking-name').focus(); return; }
   document.getElementById('talking-overlay') && document.getElementById('talking-overlay').remove();
   if (editId) {
     const idx = logs.findIndex(l=>l.id===editId);
-    const dirPersonId2 = (document.getElementById('talking-dir-id')||{}).value||'';
+    console.log('saveTalkingEntry EDIT — dirPersonId:', JSON.stringify(dirPersonId));
     if (idx>=0) {
-      logs[idx] = {...logs[idx], title:name.trim(), date, dateEnd, note, why, dirPersonId: dirPersonId2};
+      logs[idx] = {...logs[idx], title:name.trim(), date, dateEnd, note, why, dirPersonId};
       if (scriptUrl) sheetsPost('updateLog', {log:logs[idx]}).then(()=>showToast('updated ✓'));
     }
   } else {
-    const dirPersonId = (document.getElementById('talking-dir-id')||{}).value||'';
   const entry = { id:uid(), cat:'talking', title:name.trim(), who:[], date, dateEnd, note, why, dirPersonId };
+    console.log('saveTalkingEntry NEW — dirPersonId:', JSON.stringify(dirPersonId));
     logs.unshift(entry);
     if (scriptUrl) sheetsPost('addLog', {log:entry}).then(()=>showToast('logged ✓'));
   }
