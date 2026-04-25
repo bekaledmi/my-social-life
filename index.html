@@ -496,12 +496,12 @@ input::placeholder,textarea::placeholder { color:var(--text3); }
   <div class="cat-picker" id="cat-picker"></div>
   <div class="field">
     <label>description</label>
-    <input id="f-title" type="text" placeholder="e.g. rooftop party in Lincoln Park" autocomplete="off" />
+    <input id="f-title" type="text" placeholder="e.g. rooftop party in Lincoln Park" autocomplete="off" onkeydown="if(event.key==='Enter')saveLog()" />
   </div>
   <div class="two-col" id="date-row">
     <div class="field"><label id="f-date-label">date</label><input id="f-date" type="date" oninput="updateLogDrawerLabel()" /></div>
     <div class="field" id="date-end-wrap" style="display:none"><label>end date</label><input id="f-date-end" type="date" /></div>
-    <div class="field" id="note-wrap"><label>note (optional)</label><input id="f-note" placeholder="one thing to remember" autocomplete="off" /></div>
+    <div class="field" id="note-wrap"><label>note (optional)</label><input id="f-note" placeholder="one thing to remember" autocomplete="off" onkeydown="if(event.key==='Enter')saveLog()" /></div>
   </div>
   <div class="field">
     <label>participants</label>
@@ -527,7 +527,7 @@ input::placeholder,textarea::placeholder { color:var(--text3); }
   <div class="drawer-handle"></div>
   <div class="drawer-title" id="addperson-title">add person</div>
   <div class="two-col">
-    <div class="field"><label>name</label><input id="ap-name" placeholder="Full name" /></div>
+    <div class="field"><label>name</label><input id="ap-name" placeholder="Full name" onkeydown="if(event.key==='Enter')savePerson()" /></div>
     <div class="field"><label>vibe</label>
       <select id="ap-vibe" onchange="checkVibeOther(this.value)">
         <option value="best friend">best friend</option>
@@ -797,8 +797,7 @@ function renderFollowUpBanner() {
   if (!el) return;
   const today = localDateStr();
   const due = people.filter(p => {
-    if (!p.followUp) return false;
-    if (!p.followUpDate) return true; // no date = always show
+    if (!p.followUp || !p.followUpDate) return false; // require both note AND date
     return p.followUpDate <= today;
   }).sort((a,b) => {
     if (!a.followUpDate) return 1;
@@ -1036,6 +1035,8 @@ function renderSIT() {
 
 function toggleSITPerson(pid) {
   const p = people.find(x=>x.id===pid); if(!p) return;
+  const wrap = document.getElementById('sit-list-wrap');
+  const scrollTop = wrap ? wrap.scrollTop : 0;
   if (p.cadence) {
     delete p.cadence;
   } else {
@@ -1043,6 +1044,10 @@ function toggleSITPerson(pid) {
   }
   saveSITCadence(p);
   renderSIT();
+  requestAnimationFrame(()=>{
+    const w = document.getElementById('sit-list-wrap');
+    if (w) w.scrollTop = scrollTop;
+  });
 }
 
 function setSITCadence(pid, cadence) {
@@ -1519,6 +1524,7 @@ let calMonth = new Date().getMonth();
 function getCalEvents() { return calEventsCache[calYear+'-'+calMonth] || []; }
 
 async function fetchAndRenderCalendar(force) {
+  if (!gcalEnabled) { renderCalendar(); return; }
   const key = calYear+'-'+calMonth;
   if (!force && calEventsCache[key] !== undefined) {
     gcalStatusText = new Date(calYear,calMonth).toLocaleString('en',{month:'long'})+' ✓';
@@ -1536,11 +1542,13 @@ async function fetchAndRenderCalendar(force) {
     if(res&&res.ok&&res.events){ calEventsCache[key]=res.events; gcalStatusText=res.calendarAvailable===false?'calendar not connected':new Date(calYear,calMonth).toLocaleString('en',{month:'long'})+' ✓';
       setGCalDot(res.calendarAvailable===false?'none':'loaded');
       renderTodayGCal(); }
-    else { calEventsCache[key]=[]; gcalStatusText='⚠ unavailable'; }
+    else { calEventsCache[key]=[]; gcalStatusText='⚠ '+(res&&res.error ? res.error : 'unavailable'); }
     renderCalendar();
     const e2=document.getElementById('gcal-status'); if(e2) e2.textContent=gcalStatusText;
     const b2=document.getElementById('gcal-toggle-btn'); if(b2) b2.innerHTML='<span style="font-weight:700;color:#4285F4">G</span> '+(showGCal?'hide sync cal':'show sync cal');
-  }).catch(()=>{ calEventsCache[key]=[]; gcalStatusText='⚠ unavailable'; renderCalendar(); });
+  }).catch((e)=>{ calEventsCache[key]=[]; gcalStatusText='⚠ fetch failed: '+e.message; renderCalendar();
+    const e2=document.getElementById('gcal-status'); if(e2) e2.textContent=gcalStatusText;
+  });
 }
 
 function reloadGCal() { delete calEventsCache[calYear+'-'+calMonth]; fetchAndRenderCalendar(true); }
@@ -2265,7 +2273,7 @@ function saveAnger() {}
 function renderTodayGCal() {
   const el = document.getElementById('mood-gcal-suggestions');
   if (!el) return;
-  if (!showGCal) { el.innerHTML = ''; return; }
+  if (!showGCal || !gcalEnabled) { el.innerHTML = ''; return; }
 
   const today = localDateStr();
   const m = new Date(today).getMonth();
@@ -2339,8 +2347,8 @@ function renderTodaySummary() {
 
   // Follow-ups due
   people.forEach(p => {
-    if (!p.followUp) return;
-    if (!p.followUpDate || p.followUpDate <= today) {
+    if (!p.followUp || !p.followUpDate) return;
+    if (p.followUpDate <= today) {
       items.push({ icon: '📝', text: 'follow up: ' + getName(p) + (p.followUp ? ' — ' + p.followUp : ''), type: 'followup', bg: 'rgba(232,112,90,0.08)' });
     }
   });
@@ -3296,6 +3304,12 @@ let datingActiveOpen = true;
 let datingPastOpen = false;
 let datingDatesOpen = true;
 let datingHidden = true; // hidden by default; toggled via name badge → 💌 show/hide dating tab
+let gcalEnabled = localStorage.getItem('sl_gcal_enabled') !== 'false'; // enabled by default
+// Apply gcal dot visibility on init
+document.addEventListener('DOMContentLoaded', () => {
+  const dot = document.getElementById('gcal-dot');
+  if (dot && !gcalEnabled) dot.style.display = 'none';
+});
 let gcalStatusText = '';
 let talkingDayMode = 'active';
 let talkingAnnualMode = 'active';
@@ -3922,11 +3936,12 @@ function openNameEditor() {
       '</div>'+
       '<button class="btn-log" onclick="saveUserName()">save ✓</button>'+
       '<button id="dating-visibility-btn" onclick="toggleDatingTab()" style="margin-top:8px;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer">'+(datingHidden?'💌 show dating tab':'💌 hide dating tab')+'</button>'+
+      '<button id="gcal-enable-btn" onclick="toggleGCalEnabled()" style="margin-top:8px;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer">'+(gcalEnabled?'<span style=\"color:#4285F4;font-weight:700\">G</span> disable Google Calendar':'<span style=\"color:#4285F4;font-weight:700\">G</span> enable Google Calendar')+'</button>'+
       '<button onclick="document.getElementById(\'name-editor-overlay\').remove();openSyncDrawer()" style="margin-top:8px;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer">☁️ reconnect sheets</button>'+
     '</div>';
   overlay.addEventListener('click', () => overlay.remove());
   document.body.appendChild(overlay);
-  setTimeout(()=>{ const el=document.getElementById('name-editor-input'); if(el){el.focus();el.select();} }, 200);
+  setTimeout(()=>{ const el=document.getElementById('name-editor-input'); if(el){el.focus();el.select();el.addEventListener('keydown',e=>{if(e.key==='Enter')saveUserName();});} }, 200);
 }
 
 function saveUserName() {
@@ -3936,6 +3951,29 @@ function saveUserName() {
   localStorage.setItem('sl_username', val);
   document.getElementById('name-editor-overlay')?.remove();
   renderNameBadge();
+}
+
+function toggleGCalEnabled() {
+  gcalEnabled = !gcalEnabled;
+  localStorage.setItem('sl_gcal_enabled', String(gcalEnabled));
+  // Update button label inside open name editor
+  const btn = document.getElementById('gcal-enable-btn');
+  if (btn) btn.innerHTML = gcalEnabled
+    ? '<span style="color:#4285F4;font-weight:700">G</span> disable Google Calendar'
+    : '<span style="color:#4285F4;font-weight:700">G</span> enable Google Calendar';
+  // Show/hide the G dot in the name badge
+  const dot = document.getElementById('gcal-dot');
+  if (dot) dot.style.display = gcalEnabled ? '' : 'none';
+  // Clear or reload calendar
+  if (!gcalEnabled) {
+    calEventsCache = {};
+    renderCalendar();
+    renderTodayGCal();
+    const el = document.getElementById('gcal-status');
+    if (el) el.textContent = '';
+  } else {
+    fetchAndRenderCalendar(true);
+  }
 }
 
 function toggleDatingTab() {
