@@ -2556,12 +2556,12 @@ async function saveTalkingEntry(editId) {
     const idx = logs.findIndex(l=>l.id===editId);
     const dirPersonId2 = (document.getElementById('talking-dir-id')||{}).value||'';
     if (idx>=0) {
-      logs[idx] = {...logs[idx], title:name.trim(), date, dateEnd, note, why, dirPersonId: dirPersonId2||undefined};
+      logs[idx] = {...logs[idx], title:name.trim(), date, dateEnd, note, why, dirPersonId: dirPersonId2};
       if (scriptUrl) sheetsPost('updateLog', {log:logs[idx]}).then(()=>showToast('updated ✓'));
     }
   } else {
     const dirPersonId = (document.getElementById('talking-dir-id')||{}).value||'';
-  const entry = { id:uid(), cat:'talking', title:name.trim(), who:[], date, dateEnd, note, why, dirPersonId: dirPersonId||undefined };
+  const entry = { id:uid(), cat:'talking', title:name.trim(), who:[], date, dateEnd, note, why, dirPersonId };
     logs.unshift(entry);
     if (scriptUrl) sheetsPost('addLog', {log:entry}).then(()=>showToast('logged ✓'));
   }
