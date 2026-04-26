@@ -3921,6 +3921,137 @@ function disconnectSheets(){
   showToast('disconnected — using offline mode');
 }
 
+// ── DIGEST EMAIL MODAL ──
+// Lets the user send an "overview" email to themselves for any period.
+// Calls the apps-script `sendDigestRange` action.
+function digestPresets() {
+  // Build {label, startISO, endISO, heading} for each preset, computed in
+  // the browser's local timezone (which matches what the user sees in the app).
+  const today = new Date(); today.setHours(0,0,0,0);
+  const iso = (d) => {
+    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+    return y+'-'+m+'-'+day;
+  };
+  // last 7 days: 7 days ending yesterday
+  const last7End = new Date(today); last7End.setDate(last7End.getDate()-1);
+  const last7Start = new Date(last7End); last7Start.setDate(last7Start.getDate()-6);
+  // last week (prior Mon-Sun)
+  const dow = today.getDay(); // 0=Sun..6=Sat
+  const daysBack = (dow === 0 ? 6 : dow - 1) + 7;
+  const lwStart = new Date(today); lwStart.setDate(lwStart.getDate()-daysBack);
+  const lwEnd = new Date(lwStart); lwEnd.setDate(lwEnd.getDate()+6);
+  // last 30 days: 30 days ending yesterday
+  const last30End = new Date(today); last30End.setDate(last30End.getDate()-1);
+  const last30Start = new Date(last30End); last30Start.setDate(last30Start.getDate()-29);
+  // last month (1st to last day of previous calendar month)
+  const lmStart = new Date(today.getFullYear(), today.getMonth()-1, 1);
+  const lmEnd = new Date(today.getFullYear(), today.getMonth(), 0); // day 0 of this month = last day of prev
+  // this month so far
+  const tmStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const tmEnd = new Date(today); tmEnd.setDate(tmEnd.getDate()-1);
+  if (tmEnd < tmStart) tmEnd.setTime(tmStart.getTime()); // edge: it's the 1st
+  // year so far
+  const yStart = new Date(today.getFullYear(), 0, 1);
+  const yEnd = new Date(today); yEnd.setDate(yEnd.getDate()-1);
+  if (yEnd < yStart) yEnd.setTime(yStart.getTime()); // edge: jan 1
+  return [
+    {key:'last7',  label:'last 7 days',         startISO:iso(last7Start),  endISO:iso(last7End),  heading:'last 7 days ✦'},
+    {key:'lw',     label:'last week (Mon–Sun)', startISO:iso(lwStart),     endISO:iso(lwEnd),     heading:'last week in your social life ✦'},
+    {key:'last30', label:'last 30 days',        startISO:iso(last30Start), endISO:iso(last30End), heading:'last 30 days ✦'},
+    {key:'lm',     label:'last month',          startISO:iso(lmStart),     endISO:iso(lmEnd),     heading:'last month ✦'},
+    {key:'tm',     label:'this month so far',   startISO:iso(tmStart),     endISO:iso(tmEnd),     heading:'this month so far ✦'},
+    {key:'ytd',    label:'this year so far',    startISO:iso(yStart),      endISO:iso(yEnd),      heading:'this year so far ✦'},
+  ];
+}
+
+let digestPresetSel = 'lw';
+let digestCustomStart = '';
+let digestCustomEnd = '';
+
+function openDigestModal() {
+  if (!scriptUrl) {
+    showToast('connect Google Sheets first to send digests');
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.id = 'digest-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(13,31,60,.4);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.addEventListener('click', () => overlay.remove());
+  overlay.innerHTML = '<div id="digest-box" style="background:var(--surface);border-radius:var(--radius);width:100%;max-width:340px;max-height:90vh;overflow-y:auto;padding:20px;box-shadow:0 8px 32px rgba(13,31,60,.2)" onclick="event.stopPropagation()"></div>';
+  document.body.appendChild(overlay);
+  renderDigestModal();
+}
+
+function renderDigestModal() {
+  const box = document.getElementById('digest-box');
+  if (!box) return;
+  const presets = digestPresets();
+  const sel = digestPresetSel;
+  const isCustom = sel === 'custom';
+  const presetRows = presets.map(p => {
+    const on = (p.key === sel);
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid '+(on?'var(--accent)':'var(--border)')+';border-radius:var(--radius-sm);cursor:pointer;background:'+(on?'var(--accent-l)':'var(--surface)')+';margin-bottom:6px">'+
+      '<input type="radio" name="digest-period" value="'+p.key+'" '+(on?'checked':'')+' onchange="digestPresetSel=this.value;renderDigestModal()" style="margin:0">'+
+      '<div style="flex:1">'+
+        '<div style="font-size:13px;color:var(--text);font-weight:'+(on?'500':'400')+'">'+p.label+'</div>'+
+        '<div style="font-size:11px;color:var(--text3);margin-top:1px">'+fmtDate(p.startISO)+' – '+fmtDate(p.endISO)+'</div>'+
+      '</div>'+
+    '</label>';
+  }).join('');
+  const customRow = (() => {
+    const on = isCustom;
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid '+(on?'var(--accent)':'var(--border)')+';border-radius:var(--radius-sm);cursor:pointer;background:'+(on?'var(--accent-l)':'var(--surface)')+';margin-bottom:6px">'+
+      '<input type="radio" name="digest-period" value="custom" '+(on?'checked':'')+' onchange="digestPresetSel=this.value;renderDigestModal()" style="margin:0">'+
+      '<div style="flex:1"><div style="font-size:13px;color:var(--text);font-weight:'+(on?'500':'400')+'">custom range</div></div>'+
+    '</label>';
+  })();
+  const customFields = isCustom
+    ? '<div style="display:flex;gap:8px;margin-top:4px;margin-bottom:8px">'+
+        '<div style="flex:1"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">from</div>'+
+          '<input type="date" id="digest-from" value="'+digestCustomStart+'" onchange="digestCustomStart=this.value" style="width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-family:var(--font-b);font-size:13px;color:var(--text)"></div>'+
+        '<div style="flex:1"><div style="font-size:11px;color:var(--text3);margin-bottom:3px">to</div>'+
+          '<input type="date" id="digest-to" value="'+digestCustomEnd+'" onchange="digestCustomEnd=this.value" style="width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:var(--radius-sm);font-family:var(--font-b);font-size:13px;color:var(--text)"></div>'+
+      '</div>'
+    : '';
+  box.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'+
+      '<div style="font-family:var(--font-d);font-size:18px;color:var(--text)">✉️ email a digest</div>'+
+      '<button onclick="document.getElementById(\'digest-overlay\').remove()" style="background:none;border:none;font-size:20px;color:var(--text3);cursor:pointer;padding:4px;line-height:1">✕</button>'+
+    '</div>'+
+    '<div style="font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);font-weight:500;margin-bottom:8px">period</div>'+
+    presetRows + customRow + customFields +
+    '<div style="font-size:11px;color:var(--text3);margin:10px 0 14px;line-height:1.5">sent to the Gmail account that owns your spreadsheet. first send asks for a one-time mail permission.</div>'+
+    '<button id="digest-send-btn" class="btn-log" onclick="sendChosenDigest()">send digest →</button>';
+}
+
+async function sendChosenDigest() {
+  const presets = digestPresets();
+  let startISO, endISO, heading;
+  if (digestPresetSel === 'custom') {
+    startISO = digestCustomStart;
+    endISO = digestCustomEnd;
+    if (!startISO || !endISO) { showToast('pick both from and to dates'); return; }
+    if (endISO < startISO) { showToast('"to" must be on or after "from"'); return; }
+    heading = 'your social life ✦';
+  } else {
+    const p = presets.find(x => x.key === digestPresetSel);
+    if (!p) { showToast('pick a period'); return; }
+    startISO = p.startISO; endISO = p.endISO; heading = p.heading;
+  }
+  const btn = document.getElementById('digest-send-btn');
+  if (btn) { btn.textContent = 'sending…'; btn.disabled = true; btn.style.opacity = '0.7'; }
+  const r = await sheetsPost('sendDigestRange', {startISO, endISO, heading});
+  document.getElementById('digest-overlay')?.remove();
+  if (r && r.ok) {
+    showToast('digest sent to ' + (r.sentTo || 'your inbox') + ' ✓', 4000);
+  } else {
+    const err = (r && r.error) ? r.error : 'could not send';
+    showToast(err.indexOf('permission') >= 0
+      ? 'mail permission needed — run sendDigestNow once in Apps Script'
+      : 'send failed: ' + err, 5000);
+  }
+}
+
 
 function renderNameBadge() {
   const badge = document.getElementById('name-badge');
@@ -3949,6 +4080,7 @@ function openNameEditor() {
       '<button class="btn-log" onclick="saveUserName()">save ✓</button>'+
       '<button id="dating-visibility-btn" onclick="toggleDatingTab()" style="margin-top:8px;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer">'+(datingHidden?'💌 show dating tab':'💌 hide dating tab')+'</button>'+
       '<button id="gcal-enable-btn" onclick="toggleGCalEnabled()" style="margin-top:8px;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer">'+(gcalEnabled?'<span style=\"color:#4285F4;font-weight:700\">G</span> disable Google Calendar':'<span style=\"color:#4285F4;font-weight:700\">G</span> enable Google Calendar')+'</button>'+
+      '<button onclick="document.getElementById(\'name-editor-overlay\').remove();openDigestModal()" style="margin-top:8px;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer">✉️ email me a digest</button>'+
       '<button onclick="document.getElementById(\'name-editor-overlay\').remove();openSyncDrawer()" style="margin-top:8px;width:100%;padding:10px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:13px;font-family:var(--font-b);cursor:pointer">☁️ reconnect sheets</button>'+
     '</div>';
   overlay.addEventListener('click', () => overlay.remove());
